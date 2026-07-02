@@ -270,8 +270,8 @@ namespace ShareX.ScreenCaptureLib
                             {
                                 // Request FP16 so HDR desktops are captured in the canonical scRGB
                                 // composition space; SDR desktops still arrive as BGRA8
-                                session.Duplication = output6.DuplicateOutput1(device, 0,
-                                    new[] { Format.R16G16B16A16_Float, Format.B8G8R8A8_UNorm });
+                                Format[] supportedFormats = { Format.R16G16B16A16_Float, Format.B8G8R8A8_UNorm };
+                                session.Duplication = output6.DuplicateOutput1(device, (uint)supportedFormats.Length, supportedFormats);
                             }
                             catch (Exception e)
                             {
@@ -279,6 +279,9 @@ namespace ShareX.ScreenCaptureLib
                                 session.Dispose();
                                 continue;
                             }
+
+                            DebugHelper.WriteLine($"Desktop duplication session created for {desc.DeviceName}: HDR={session.IsHDR}, " +
+                                $"SDRWhiteLevel={session.SDRWhiteLevelNits}nits, MaxLuminance={session.MaxLuminanceNits}nits");
 
                             sessions.Add(session);
                         }
@@ -377,6 +380,26 @@ namespace ShareX.ScreenCaptureLib
 
         private static void UpdateLastFrame(OutputSession session)
         {
+            // The first frame after starting duplication can take a few vsyncs to arrive,
+            // especially on a static desktop, so retry before giving up
+            int attempts = session.HasFrame ? 1 : 5;
+
+            for (int attempt = 0; attempt < attempts; attempt++)
+            {
+                if (TryAcquireFrame(session) || session.HasFrame)
+                {
+                    return;
+                }
+            }
+
+            if (!session.HasFrame)
+            {
+                throw new InvalidOperationException($"Desktop duplication produced no frame for {session.DeviceName}.");
+            }
+        }
+
+        private static bool TryAcquireFrame(OutputSession session)
+        {
             Result result = session.Duplication.AcquireNextFrame(AcquireFrameTimeoutMs, out OutduplFrameInfo frameInfo,
                 out IDXGIResource desktopResource);
 
@@ -421,19 +444,18 @@ namespace ShareX.ScreenCaptureLib
                     desktopResource.Dispose();
                     session.Duplication.ReleaseFrame();
                 }
+
+                return true;
             }
-            else if (result == Vortice.DXGI.ResultCode.WaitTimeout)
+
+            if (result == Vortice.DXGI.ResultCode.WaitTimeout)
             {
-                // Desktop has not changed since the last acquired frame; the cached copy is still valid
-                if (!session.HasFrame)
-                {
-                    throw new InvalidOperationException($"Desktop duplication produced no frame for {session.DeviceName}.");
-                }
+                // Desktop has not changed since the last acquired frame; a cached copy stays valid
+                return false;
             }
-            else
-            {
-                result.CheckError();
-            }
+
+            result.CheckError();
+            return false;
         }
     }
 }
