@@ -13,6 +13,13 @@
 <p align="center"><a href="https://getsharex.com"><img src="https://getsharex.com/img/ShareX_Screenshot.png" alt="ShareX Screenshot"/></a></p>
 <p align="center">For further information please check our <a href="https://getsharex.com">website</a></p>
 
+## ShareX HDR
+This fork adds HDR-aware screen capture and screenshot quality/performance improvements:
+* HDR desktops are captured in FP16 linear scRGB through DXGI Desktop Duplication instead of GDI, fixing washed-out / overbright HDR screenshots.
+* HDR frames are tone mapped to SDR with a BT.2390 EETF roll-off in the PQ domain, anchored to each monitor's SDR reference white level, with hue-preserving gamut mapping and ordered dithering.
+* Duplication sessions are cached per output, so repeated captures avoid duplication setup cost.
+* JPEG output is encoded through WIC for better quality and speed than the legacy GDI+ encoder.
+
 ## Links
 * Official website: https://getsharex.com
 * GitHub: https://github.com/ShareX/ShareX
