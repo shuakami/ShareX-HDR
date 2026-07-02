@@ -3018,10 +3018,76 @@ namespace ShareX.HelpersLib
         {
             quality = quality.Clamp(0, 100);
 
+            try
+            {
+                SaveJPEGWIC(img, stream, quality);
+                return;
+            }
+            catch (Exception e)
+            {
+                DebugHelper.WriteException(e, "WIC JPEG encoding failed, falling back to GDI+.");
+            }
+
             using (EncoderParameters encoderParameters = new EncoderParameters(1))
             {
                 encoderParameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, quality);
                 img.Save(stream, ImageFormat.Jpeg.GetCodecInfo(), encoderParameters);
+            }
+        }
+
+        // The WIC JPEG encoder produces visibly better output than the legacy GDI+ encoder at the
+        // same quality setting (notably fewer artifacts around text and hard edges) and is faster
+        private static void SaveJPEGWIC(Image img, Stream stream, int quality)
+        {
+            Bitmap bmp = img as Bitmap;
+            bool disposeBmp = false;
+
+            if (bmp == null || (bmp.PixelFormat != PixelFormat.Format32bppArgb && bmp.PixelFormat != PixelFormat.Format32bppRgb &&
+                bmp.PixelFormat != PixelFormat.Format24bppRgb))
+            {
+                bmp = new Bitmap(img.Width, img.Height, PixelFormat.Format24bppRgb);
+                disposeBmp = true;
+
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    g.DrawImage(img, 0, 0, img.Width, img.Height);
+                }
+            }
+
+            try
+            {
+                System.Windows.Media.PixelFormat wpfFormat = bmp.PixelFormat == PixelFormat.Format24bppRgb
+                    ? System.Windows.Media.PixelFormats.Bgr24
+                    : System.Windows.Media.PixelFormats.Bgr32;
+
+                BitmapData bmpData = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, bmp.PixelFormat);
+
+                System.Windows.Media.Imaging.BitmapSource source;
+
+                try
+                {
+                    source = System.Windows.Media.Imaging.BitmapSource.Create(bmp.Width, bmp.Height, 96, 96, wpfFormat, null,
+                        bmpData.Scan0, bmpData.Stride * bmp.Height, bmpData.Stride);
+                }
+                finally
+                {
+                    bmp.UnlockBits(bmpData);
+                }
+
+                System.Windows.Media.Imaging.JpegBitmapEncoder encoder = new System.Windows.Media.Imaging.JpegBitmapEncoder
+                {
+                    QualityLevel = Math.Max(quality, 1)
+                };
+
+                encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(source));
+                encoder.Save(stream);
+            }
+            finally
+            {
+                if (disposeBmp)
+                {
+                    bmp.Dispose();
+                }
             }
         }
 
