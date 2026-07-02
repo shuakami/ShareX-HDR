@@ -55,19 +55,38 @@ namespace ShareX.ScreenCaptureLib
         private const float PqC2 = 2413f / 4096f * 32f;
         private const float PqC3 = 2392f / 4096f * 32f;
 
-        private static readonly byte[] encodeLut = BuildEncodeLut();
+        // sRGB OETF sampled on a linear grid, kept in continuous 8-bit units so dithering can be
+        // applied before quantization
+        private static readonly float[] encodeLut = BuildEncodeLut();
 
-        // 8x8 Bayer matrix, normalized to [-0.5, 0.5) and scaled to one 8-bit quantization step
+        // half bit pattern -> float, with NaN sanitized to 0. Table lookups are faster than
+        // conversion in the per-pixel loops and pixels cluster in a small, cache-friendly range
+        private static readonly float[] halfLut = BuildHalfLut();
+
+        // 8x8 Bayer matrix, normalized to [-0.5, 0.5) in 8-bit quantization steps
         private static readonly float[] bayer8 = BuildBayerMatrix();
 
-        private static byte[] BuildEncodeLut()
+        private static float[] BuildEncodeLut()
         {
-            byte[] lut = new byte[EncodeLutSize];
+            float[] lut = new float[EncodeLutSize];
 
             for (int i = 0; i < EncodeLutSize; i++)
             {
                 float linear = i / (float)(EncodeLutSize - 1);
-                lut[i] = (byte)Math.Round(SrgbEncode(linear) * 255f);
+                lut[i] = SrgbEncode(linear) * 255f;
+            }
+
+            return lut;
+        }
+
+        private static float[] BuildHalfLut()
+        {
+            float[] lut = new float[65536];
+
+            for (int i = 0; i < 65536; i++)
+            {
+                float value = (float)BitConverter.UInt16BitsToHalf((ushort)i);
+                lut[i] = float.IsNaN(value) ? 0f : value;
             }
 
             return lut;
@@ -91,7 +110,7 @@ namespace ShareX.ScreenCaptureLib
 
             for (int i = 0; i < 64; i++)
             {
-                matrix[i] = ((bayer[i] + 0.5f) / 64f - 0.5f) / 255f;
+                matrix[i] = (bayer[i] + 0.5f) / 64f - 0.5f;
             }
 
             return matrix;
@@ -225,7 +244,8 @@ namespace ShareX.ScreenCaptureLib
 
             byte* srcBase = (byte*)source;
             byte* dstBase = (byte*)destination;
-            byte[] encode = encodeLut;
+            float[] encode = encodeLut;
+            float[] half = halfLut;
             float[] bayer = bayer8;
 
             Parallel.For(0, sourceRect.Height, y =>
@@ -236,9 +256,9 @@ namespace ShareX.ScreenCaptureLib
 
                 for (int x = 0; x < sourceRect.Width; x++)
                 {
-                    float r = (float)BitConverter.UInt16BitsToHalf(srcRow[0]) * scRgbToRef;
-                    float g = (float)BitConverter.UInt16BitsToHalf(srcRow[1]) * scRgbToRef;
-                    float b = (float)BitConverter.UInt16BitsToHalf(srcRow[2]) * scRgbToRef;
+                    float r = half[srcRow[0]] * scRgbToRef;
+                    float g = half[srcRow[1]] * scRgbToRef;
+                    float b = half[srcRow[2]] * scRgbToRef;
 
                     if (r < 0f) r = 0f;
                     if (g < 0f) g = 0f;
@@ -297,7 +317,8 @@ namespace ShareX.ScreenCaptureLib
 
             byte* srcBase = (byte*)source;
             byte* dstBase = (byte*)destination;
-            byte[] encode = encodeLut;
+            float[] encode = encodeLut;
+            float[] half = halfLut;
             float[] bayer = bayer8;
 
             Parallel.For(0, sourceRect.Height, y =>
@@ -308,9 +329,9 @@ namespace ShareX.ScreenCaptureLib
 
                 for (int x = 0; x < sourceRect.Width; x++)
                 {
-                    float r = (float)BitConverter.UInt16BitsToHalf(srcRow[0]) * scRgbToRef;
-                    float g = (float)BitConverter.UInt16BitsToHalf(srcRow[1]) * scRgbToRef;
-                    float b = (float)BitConverter.UInt16BitsToHalf(srcRow[2]) * scRgbToRef;
+                    float r = half[srcRow[0]] * scRgbToRef;
+                    float g = half[srcRow[1]] * scRgbToRef;
+                    float b = half[srcRow[2]] * scRgbToRef;
 
                     if (r < 0f) r = 0f; else if (r > 1f) r = 1f;
                     if (g < 0f) g = 0f; else if (g > 1f) g = 1f;
@@ -329,15 +350,20 @@ namespace ShareX.ScreenCaptureLib
             });
         }
 
-        private static byte EncodeChannel(float linear, float dither, byte[] encode)
+        private static byte EncodeChannel(float linear, float dither, float[] encode)
         {
-            int index = (int)(linear * (EncodeLutSize - 1));
-            float encoded = encode[index] / 255f + dither;
+            // Interpolate the continuous sRGB value, dither, then quantize; dithering after
+            // quantization would be a no-op
+            float pos = linear * (EncodeLutSize - 1);
+            int index = (int)pos;
+            float frac = pos - index;
+            int next = Math.Min(index + 1, EncodeLutSize - 1);
+            float encoded = encode[index] * (1f - frac) + encode[next] * frac + dither;
 
             if (encoded <= 0f) return 0;
-            if (encoded >= 1f) return 255;
+            if (encoded >= 255f) return 255;
 
-            return (byte)(encoded * 255f + 0.5f);
+            return (byte)(encoded + 0.5f);
         }
 
         /// <summary>
@@ -370,9 +396,9 @@ namespace ShareX.ScreenCaptureLib
                 for (int x = 0; x < sourceRect.Width; x += stepX)
                 {
                     ushort* px = srcRow + (long)x * 4;
-                    float r = (float)BitConverter.UInt16BitsToHalf(px[0]);
-                    float g = (float)BitConverter.UInt16BitsToHalf(px[1]);
-                    float b = (float)BitConverter.UInt16BitsToHalf(px[2]);
+                    float r = halfLut[px[0]];
+                    float g = halfLut[px[1]];
+                    float b = halfLut[px[2]];
 
                     float nits = 80f * (LumR * MathF.Max(r, 0f) + LumG * MathF.Max(g, 0f) + LumB * MathF.Max(b, 0f));
                     int bin = (int)(MathF.Sqrt(MathF.Min(nits, MaxTrackedNits)) * binScale);
