@@ -387,7 +387,7 @@ namespace ShareX.ScreenCaptureLib
         {
             // The first frame after starting duplication can take a few vsyncs to arrive,
             // especially on a static desktop, so retry before giving up
-            int attempts = session.HasFrame ? 1 : 5;
+            int attempts = session.HasFrame ? 1 : 10;
 
             for (int attempt = 0; attempt < attempts; attempt++)
             {
@@ -412,6 +412,15 @@ namespace ShareX.ScreenCaptureLib
             {
                 try
                 {
+                    // AcquireNextFrame can succeed before the desktop has ever been presented to
+                    // the duplication surface (LastPresentTime == 0), in which case the texture
+                    // contents are undefined - typically black. Only accept surfaces that carry a
+                    // real desktop image, otherwise the first capture after startup is black
+                    if (frameInfo.LastPresentTime == 0 && !session.HasFrame)
+                    {
+                        return false;
+                    }
+
                     using (ID3D11Texture2D frameTexture = desktopResource.QueryInterface<ID3D11Texture2D>())
                     {
                         Texture2DDescription desc = frameTexture.Description;
