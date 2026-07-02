@@ -1,13 +1,6 @@
-<h3 align="center">ShareX HDR</h3>
-<p align="center">ShareX with proper HDR screen capture, so screenshots don't come out washed out when Windows HDR is on.</p>
+# ShareX HDR
 
-<div align="center">
-  <a href="https://github.com/shuakami/ShareX-HDR/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/shuakami/ShareX-HDR/build.yml?branch=main&label=build" alt="Build Status"/></a>
-  <a href="https://github.com/shuakami/ShareX-HDR/releases/latest"><img src="https://img.shields.io/github/v/release/shuakami/ShareX-HDR?label=release" alt="Latest Release"/></a>
-  <a href="https://github.com/shuakami/ShareX-HDR/releases"><img src="https://img.shields.io/github/downloads/shuakami/ShareX-HDR/total?label=downloads" alt="Downloads"/></a>
-  <a href="./LICENSE.txt"><img src="https://img.shields.io/github/license/shuakami/ShareX-HDR?label=license" alt="License"/></a>
-</div>
-<br>
+<a href="https://github.com/shuakami/ShareX-HDR/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/shuakami/ShareX-HDR/build.yml?branch=main&label=build" alt="Build Status"/></a> <a href="https://github.com/shuakami/ShareX-HDR/releases/latest"><img src="https://img.shields.io/github/v/release/shuakami/ShareX-HDR?label=release" alt="Latest Release"/></a> <a href="https://github.com/shuakami/ShareX-HDR/releases"><img src="https://img.shields.io/github/downloads/shuakami/ShareX-HDR/total?label=downloads" alt="Downloads"/></a> <a href="./LICENSE.txt"><img src="https://img.shields.io/github/license/shuakami/ShareX-HDR?label=license" alt="License"/></a>
 
 If you play HDR games or run an HDR desktop, you know the problem: you press Print Screen and the screenshot comes out gray, too bright, with the color drained out of it. This happens with stock ShareX, Snipping Tool, and pretty much every tool that still captures through GDI.
 
