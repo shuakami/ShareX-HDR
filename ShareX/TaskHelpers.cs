@@ -2481,10 +2481,10 @@ namespace ShareX
 
         public static async Task DownloadDevBuild()
         {
-            GitHubUpdateChecker updateChecker = new GitHubUpdateChecker("ShareX", "DevBuilds")
+            GitHubUpdateChecker updateChecker = new GitHubUpdateChecker("shuakami", "ShareX-HDR")
             {
-                IsDev = true,
-                IsPortable = Program.Portable
+                IsPortable = Program.Portable,
+                IncludePreRelease = true
             };
 
             await updateChecker.CheckUpdateAsync();
