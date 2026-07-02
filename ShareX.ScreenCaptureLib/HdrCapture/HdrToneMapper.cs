@@ -208,6 +208,15 @@ namespace ShareX.ScreenCaptureLib
             }
 
             float maxContentNits = EstimateMaxContentLuminance(source, sourceRowPitch, sourceRect, displayMaxNits);
+
+            // Pure SDR content: nothing exceeds reference white, so tone mapping and gamut
+            // mapping are identity operations and the whole analysis pipeline can be skipped
+            if (maxContentNits <= sdrWhiteLevelNits * 1.001f)
+            {
+                ConvertSdrFastPath(source, sourceRowPitch, sourceRect, destination, destinationRowPitch, sdrWhiteLevelNits);
+                return;
+            }
+
             float[] toneMapLut = BuildToneMapLut(sdrWhiteLevelNits, maxContentNits);
 
             float scRgbToRef = 80f / sdrWhiteLevelNits;
@@ -281,6 +290,45 @@ namespace ShareX.ScreenCaptureLib
             });
         }
 
+        private static void ConvertSdrFastPath(IntPtr source, int sourceRowPitch, System.Drawing.Rectangle sourceRect,
+            IntPtr destination, int destinationRowPitch, float sdrWhiteLevelNits)
+        {
+            float scRgbToRef = 80f / sdrWhiteLevelNits;
+
+            byte* srcBase = (byte*)source;
+            byte* dstBase = (byte*)destination;
+            byte[] encode = encodeLut;
+            float[] bayer = bayer8;
+
+            Parallel.For(0, sourceRect.Height, y =>
+            {
+                ushort* srcRow = (ushort*)(srcBase + (long)(sourceRect.Y + y) * sourceRowPitch) + sourceRect.X * 4;
+                byte* dstRow = dstBase + (long)y * destinationRowPitch;
+                int bayerRow = (y & 7) << 3;
+
+                for (int x = 0; x < sourceRect.Width; x++)
+                {
+                    float r = (float)BitConverter.UInt16BitsToHalf(srcRow[0]) * scRgbToRef;
+                    float g = (float)BitConverter.UInt16BitsToHalf(srcRow[1]) * scRgbToRef;
+                    float b = (float)BitConverter.UInt16BitsToHalf(srcRow[2]) * scRgbToRef;
+
+                    if (r < 0f) r = 0f; else if (r > 1f) r = 1f;
+                    if (g < 0f) g = 0f; else if (g > 1f) g = 1f;
+                    if (b < 0f) b = 0f; else if (b > 1f) b = 1f;
+
+                    float dither = bayer[bayerRow + (x & 7)];
+
+                    dstRow[0] = EncodeChannel(b, dither, encode);
+                    dstRow[1] = EncodeChannel(g, dither, encode);
+                    dstRow[2] = EncodeChannel(r, dither, encode);
+                    dstRow[3] = 255;
+
+                    srcRow += 4;
+                    dstRow += 4;
+                }
+            });
+        }
+
         private static byte EncodeChannel(float linear, float dither, byte[] encode)
         {
             int index = (int)(linear * (EncodeLutSize - 1));
@@ -310,7 +358,10 @@ namespace ShareX.ScreenCaptureLib
 
             int[] histogram = new int[HistogramSize];
             long samples = 0;
-            float pqMax = PqEncode(MaxTrackedNits);
+
+            // Bins are distributed on sqrt(luminance); any monotonic transform yields the same
+            // percentile, and this avoids two pow() calls per sample that PQ binning would cost
+            float binScale = (HistogramSize - 1) / MathF.Sqrt(MaxTrackedNits);
 
             for (int y = 0; y < sourceRect.Height; y += stepY)
             {
@@ -324,10 +375,7 @@ namespace ShareX.ScreenCaptureLib
                     float b = (float)BitConverter.UInt16BitsToHalf(px[2]);
 
                     float nits = 80f * (LumR * MathF.Max(r, 0f) + LumG * MathF.Max(g, 0f) + LumB * MathF.Max(b, 0f));
-                    float pq = PqEncode(nits) / pqMax;
-                    int bin = (int)(pq * (HistogramSize - 1));
-                    if (bin < 0) bin = 0;
-                    if (bin >= HistogramSize) bin = HistogramSize - 1;
+                    int bin = (int)(MathF.Sqrt(MathF.Min(nits, MaxTrackedNits)) * binScale);
                     histogram[bin]++;
                     samples++;
                 }
@@ -352,7 +400,8 @@ namespace ShareX.ScreenCaptureLib
                 }
             }
 
-            float peakNits = PqDecode((peakBin + 1) / (float)(HistogramSize - 1) * pqMax);
+            float sqrtPeak = (peakBin + 1) / ((HistogramSize - 1) / MathF.Sqrt(MaxTrackedNits));
+            float peakNits = sqrtPeak * sqrtPeak;
 
             if (displayMaxNits > 0f)
             {

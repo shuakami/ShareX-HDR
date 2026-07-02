@@ -2915,30 +2915,48 @@ namespace ShareX.HelpersLib
                 }
             }
 
-            if (bitDepth == PNGBitDepth.Bit32)
+            PixelFormat targetFormat = bitDepth == PNGBitDepth.Bit32 ? PixelFormat.Format32bppArgb : PixelFormat.Format24bppRgb;
+
+            try
             {
-                if (img.PixelFormat != PixelFormat.Format32bppArgb && img.PixelFormat != PixelFormat.Format32bppRgb)
-                {
-                    using (Bitmap bmpNew = ((Bitmap)img).Clone(new Rectangle(0, 0, img.Width, img.Height), PixelFormat.Format32bppArgb))
-                    {
-                        bmpNew.Save(stream, ImageFormat.Png);
-                        return;
-                    }
-                }
+                SavePNGWIC(img, stream, targetFormat);
+                return;
             }
-            else if (bitDepth == PNGBitDepth.Bit24)
+            catch (Exception e)
             {
-                if (img.PixelFormat != PixelFormat.Format24bppRgb)
+                DebugHelper.WriteException(e, "WIC PNG encoding failed, falling back to GDI+.");
+            }
+
+            if (img.PixelFormat != targetFormat && !(bitDepth == PNGBitDepth.Bit32 && img.PixelFormat == PixelFormat.Format32bppRgb))
+            {
+                using (Bitmap bmpNew = ((Bitmap)img).Clone(new Rectangle(0, 0, img.Width, img.Height), targetFormat))
                 {
-                    using (Bitmap bmpNew = ((Bitmap)img).Clone(new Rectangle(0, 0, img.Width, img.Height), PixelFormat.Format24bppRgb))
-                    {
-                        bmpNew.Save(stream, ImageFormat.Png);
-                        return;
-                    }
+                    bmpNew.Save(stream, ImageFormat.Png);
+                    return;
                 }
             }
 
             img.Save(stream, ImageFormat.Png);
+        }
+
+        // The WIC PNG encoder is significantly faster than the legacy GDI+ encoder at
+        // comparable compression, which matters for large multi-monitor screenshots
+        private static void SavePNGWIC(Image img, Stream stream, PixelFormat targetFormat)
+        {
+            System.Windows.Media.Imaging.BitmapSource source = CreateBitmapSource(img, targetFormat);
+
+            System.Windows.Media.PixelFormat wpfTargetFormat = targetFormat == PixelFormat.Format32bppArgb
+                ? System.Windows.Media.PixelFormats.Bgra32
+                : System.Windows.Media.PixelFormats.Bgr24;
+
+            if (source.Format != wpfTargetFormat)
+            {
+                source = new System.Windows.Media.Imaging.FormatConvertedBitmap(source, wpfTargetFormat, null, 0);
+            }
+
+            System.Windows.Media.Imaging.PngBitmapEncoder encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(source));
+            encoder.Save(stream);
         }
 
         public static MemoryStream PNGStripChunks(MemoryStream stream, params string[] chunks)
@@ -3039,13 +3057,24 @@ namespace ShareX.HelpersLib
         // same quality setting (notably fewer artifacts around text and hard edges) and is faster
         private static void SaveJPEGWIC(Image img, Stream stream, int quality)
         {
+            System.Windows.Media.Imaging.JpegBitmapEncoder encoder = new System.Windows.Media.Imaging.JpegBitmapEncoder
+            {
+                QualityLevel = Math.Max(quality, 1)
+            };
+
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(CreateBitmapSource(img, PixelFormat.Format24bppRgb)));
+            encoder.Save(stream);
+        }
+
+        private static System.Windows.Media.Imaging.BitmapSource CreateBitmapSource(Image img, PixelFormat fallbackFormat)
+        {
             Bitmap bmp = img as Bitmap;
             bool disposeBmp = false;
 
             if (bmp == null || (bmp.PixelFormat != PixelFormat.Format32bppArgb && bmp.PixelFormat != PixelFormat.Format32bppRgb &&
                 bmp.PixelFormat != PixelFormat.Format24bppRgb))
             {
-                bmp = new Bitmap(img.Width, img.Height, PixelFormat.Format24bppRgb);
+                bmp = new Bitmap(img.Width, img.Height, fallbackFormat);
                 disposeBmp = true;
 
                 using (Graphics g = Graphics.FromImage(bmp))
@@ -3056,31 +3085,24 @@ namespace ShareX.HelpersLib
 
             try
             {
-                System.Windows.Media.PixelFormat wpfFormat = bmp.PixelFormat == PixelFormat.Format24bppRgb
-                    ? System.Windows.Media.PixelFormats.Bgr24
-                    : System.Windows.Media.PixelFormats.Bgr32;
+                System.Windows.Media.PixelFormat wpfFormat = bmp.PixelFormat switch
+                {
+                    PixelFormat.Format24bppRgb => System.Windows.Media.PixelFormats.Bgr24,
+                    PixelFormat.Format32bppArgb => System.Windows.Media.PixelFormats.Bgra32,
+                    _ => System.Windows.Media.PixelFormats.Bgr32
+                };
 
                 BitmapData bmpData = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, bmp.PixelFormat);
 
-                System.Windows.Media.Imaging.BitmapSource source;
-
                 try
                 {
-                    source = System.Windows.Media.Imaging.BitmapSource.Create(bmp.Width, bmp.Height, 96, 96, wpfFormat, null,
+                    return System.Windows.Media.Imaging.BitmapSource.Create(bmp.Width, bmp.Height, 96, 96, wpfFormat, null,
                         bmpData.Scan0, bmpData.Stride * bmp.Height, bmpData.Stride);
                 }
                 finally
                 {
                     bmp.UnlockBits(bmpData);
                 }
-
-                System.Windows.Media.Imaging.JpegBitmapEncoder encoder = new System.Windows.Media.Imaging.JpegBitmapEncoder
-                {
-                    QualityLevel = Math.Max(quality, 1)
-                };
-
-                encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(source));
-                encoder.Save(stream);
             }
             finally
             {

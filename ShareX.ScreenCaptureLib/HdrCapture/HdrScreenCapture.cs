@@ -30,6 +30,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using Vortice.Direct3D;
+using Vortice.Mathematics;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
 
@@ -302,20 +303,24 @@ namespace ShareX.ScreenCaptureLib
             }
 
             Rectangle intersection = Rectangle.Intersect(session.DesktopBounds, rect);
+            Rectangle frameRect = new Rectangle(intersection.X - session.DesktopBounds.X,
+                intersection.Y - session.DesktopBounds.Y, intersection.Width, intersection.Height);
 
             Texture2DDescription frameDesc = session.LastFrame.Description;
 
+            // Stage and read back only the requested region: region captures on 4K/8K HDR
+            // desktops would otherwise pay a full-frame GPU copy and CPU readback
             if (session.StagingTexture == null ||
-                session.StagingTexture.Description.Width != frameDesc.Width ||
-                session.StagingTexture.Description.Height != frameDesc.Height ||
+                session.StagingTexture.Description.Width != (uint)frameRect.Width ||
+                session.StagingTexture.Description.Height != (uint)frameRect.Height ||
                 session.StagingTexture.Description.Format != frameDesc.Format)
             {
                 session.StagingTexture?.Dispose();
 
                 Texture2DDescription stagingDesc = new Texture2DDescription
                 {
-                    Width = frameDesc.Width,
-                    Height = frameDesc.Height,
+                    Width = (uint)frameRect.Width,
+                    Height = (uint)frameRect.Height,
                     MipLevels = 1,
                     ArraySize = 1,
                     Format = frameDesc.Format,
@@ -329,14 +334,14 @@ namespace ShareX.ScreenCaptureLib
                 session.StagingTexture = session.Device.CreateTexture2D(stagingDesc);
             }
 
-            session.Context.CopyResource(session.StagingTexture, session.LastFrame);
+            Box sourceBox = new Box(frameRect.Left, frameRect.Top, 0, frameRect.Right, frameRect.Bottom, 1);
+            session.Context.CopySubresourceRegion(session.StagingTexture, 0, 0, 0, 0, session.LastFrame, 0, sourceBox);
 
             MappedSubresource mapped = session.Context.Map(session.StagingTexture, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
 
             try
             {
-                Rectangle sourceRect = new Rectangle(intersection.X - session.DesktopBounds.X,
-                    intersection.Y - session.DesktopBounds.Y, intersection.Width, intersection.Height);
+                Rectangle sourceRect = new Rectangle(0, 0, frameRect.Width, frameRect.Height);
 
                 IntPtr destination = bmpData.Scan0
                     + (nint)((long)(intersection.Y - rect.Y) * bmpData.Stride

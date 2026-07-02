@@ -11,6 +11,14 @@
 
 **ShareX HDR** is a fork of [ShareX](https://github.com/ShareX/ShareX) that fixes the long-standing problem of **washed-out, overbright, gray-looking screenshots when Windows HDR is enabled**. If your screenshots of HDR games (CS2, Cyberpunk 2077, Elden Ring…) or an HDR desktop look faded, blown out, or desaturated with regular ShareX, Snipping Tool, or Print Screen — this build captures them correctly.
 
+## Before / After
+
+CS2 with Windows HDR enabled, captured with the same hotkey:
+
+| Stock capture (washed out) | ShareX HDR (tone mapped) |
+| --- | --- |
+| ![Washed-out HDR screenshot with stock capture](docs/hdr-comparison-before.jpg) | ![Correct HDR screenshot with ShareX HDR](docs/hdr-comparison-after.jpg) |
+
 ## Download
 
 Grab the latest installer or portable build from the **[Releases page](https://github.com/shuakami/ShareX-HDR/releases/latest)**:
